@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use faultforge_shared::{
     decode_start, encode_end, encode_fault_event, encode_pong, encode_sensor, FrameParser,
-    K_ABORT, K_PING, K_START, Lcg, MAX_FRAME,
+    K_ABORT, K_PING, K_START, Lcg,
 };
 use tokio::sync::mpsc;
 

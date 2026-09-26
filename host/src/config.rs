@@ -31,18 +31,10 @@ pub struct CampaignParams {
 pub struct HostParams {
     #[serde(default = "default_port")]
     pub port: String,
-    #[serde(default = "default_baud")]
-    pub baud: u32,
-    #[serde(default = "default_timeout")]
-    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct ReportParams {
-    #[serde(default = "default_csv_dir")]
-    pub csv_dir: String,
-    #[serde(default = "default_csv_prefix")]
-    pub csv_prefix: String,
     #[serde(default)]
     pub quiet: bool,
 }
@@ -52,10 +44,6 @@ fn default_packets() -> u16 { 1500 }
 fn default_cadence() -> u16 { 5 }
 fn default_profile() -> String { "fuzz".into() }
 fn default_port() -> String { "auto".into() }
-fn default_baud() -> u32 { 115_200 }
-fn default_timeout() -> u64 { 50 }
-fn default_csv_dir() -> String { "faultforge_out".into() }
-fn default_csv_prefix() -> String { "campaign".into() }
 
 impl CampaignConfigYaml {
     pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
@@ -68,9 +56,9 @@ impl CampaignConfigYaml {
         let weights = if self.campaign.weights.len() == N_FAULT_KINDS {
             let mut w = [0u8; N_FAULT_KINDS];
             w.copy_from_slice(&self.campaign.weights);
-            w
+            Some(w)
         } else {
-            crate::campaign::profile_weights(&self.campaign.profile)
+            None
         };
 
         crate::Opts {
@@ -80,6 +68,7 @@ impl CampaignConfigYaml {
             cadence_ms: self.campaign.cadence_ms,
             profile: Box::leak(self.campaign.profile.clone().into_boxed_str()),
             quiet: self.report.quiet,
+            weights,
         }
     }
 }

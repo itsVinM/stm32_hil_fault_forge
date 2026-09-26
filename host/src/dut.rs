@@ -38,7 +38,6 @@ pub struct Detection {
     pub kind: DetKind,
     pub seq: u16,
     pub at: Instant,
-    pub frame_idx: u64,
 }
 
 /// A frame produced by the shared streaming parser.
@@ -57,7 +56,6 @@ pub struct Dut {
     last_time: Option<Instant>,
     junk_run: u32,
     burst_flagged: bool,
-    pub frame_idx: u64,
     pub detections: Vec<Detection>,
 }
 
@@ -69,7 +67,6 @@ impl Dut {
             last_time: None,
             junk_run: 0,
             burst_flagged: false,
-            frame_idx: 0,
             detections: Vec::new(),
         }
     }
@@ -79,7 +76,6 @@ impl Dut {
             kind,
             seq,
             at: Instant::now(),
-            frame_idx: self.frame_idx,
         });
     }
 
@@ -91,8 +87,6 @@ impl Dut {
     }
 
     pub fn process(&mut self, f: &DuFrame) {
-        self.frame_idx += 1;
-
         if f.garbage {
             self.junk_run += 1;
             self.burst_flagged = false;
@@ -159,12 +153,11 @@ pub struct GroundTruth {
     pub fault_id: u32,
     pub kind: u8,
     pub at_seq: u16,
-    pub frame_idx: u64,
     pub at: Instant,
 }
 
 impl GroundTruth {
-    pub fn from_payload(p: &[u8], frame_idx: u64) -> Option<Self> {
+    pub fn from_payload(p: &[u8]) -> Option<Self> {
         if p.len() < faultforge_shared::FAULT_PAYLOAD_LEN {
             return None;
         }
@@ -172,7 +165,6 @@ impl GroundTruth {
             fault_id: get_u32(p, 0),
             kind: p[4],
             at_seq: get_u16(p, 5),
-            frame_idx,
             at: Instant::now(),
         })
     }
@@ -279,7 +271,7 @@ mod tests {
         let mut got = None;
         for &x in &b[..n] {
             if let Some(faultforge_shared::Decoded::Frame { payload, len, .. }) = p.push(x) {
-                got = GroundTruth::from_payload(&payload[..len], 1);
+                got = GroundTruth::from_payload(&payload[..len]);
             }
         }
         let gt = got.unwrap();

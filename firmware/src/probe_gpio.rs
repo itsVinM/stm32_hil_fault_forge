@@ -1,21 +1,6 @@
-//! `probe::GpioOps` backend for the STM32F401RE — direct register access.
-//!
-//! Mirrors the HiL Probe STM32F4 GPIO backend: BSRR/IDR/MODER for pins,
-//! DWT_CYCCNT for nanosecond timing. Kept deliberately dependency-free
-//! (`core` + volatile MMIO) so it does not depend on a particular
-//! `embassy-stm32` pin type and can be wired into `main.rs` once the
-//! firmware's upstream build issues are resolved:
-//!
-//! ```ignore
-//! let mut gpio = probe_gpio::Stm32Gpio::new();
-//! faultforge_shared::probe::spi::exercise(&mut gpio, 0, 1_000_000);
-//! ```
-//!
-//! Pin map (logical -> physical), matching `hil-probe/cpp_src/platform/stm32f4.cpp`:
-//!   SCK=PA0 MOSI=PA1 MISO=PA2 CS=PA3  SCL=PB0 SDA=PB1
-//!   DQ=PB4  TX=PA9  RX=PA10           TX_EN=PB11
+//! probe::GPIO backend for STM32F401RE - direct registry access
 
-#![allow(dead_code)] // not yet referenced by main.rs (firmware build broken upstream)
+#![allow(dead_code)]
 
 use core::marker::PhantomData;
 use faultforge_shared::probe::GpioOps;
@@ -35,11 +20,11 @@ const PIN_TABLE: [(u8, u16, bool); 14] = [
     (1, 6, false),  // 10 (DHT) PB6 out
     (1, 11, false), // 11 TX_EN PB11 out
     (1, 12, false), // 12 CAN_TX PB12 out
-    (1, 13, true),  // 13 CAN_RX PB13 in
+    (1, 13, true),   //13 CAN_RX PB13 in
 ];
 
 const GPIOA_BASE: u32 = 0x4002_0000;
-const RCC_AHB1ENR: u32 = 0x4002_3830;
+const RCC_AHB1ENR: u32 = 0x4002_3830
 
 /// STM32F401RE direct-register GPIO backend for `probe`.
 pub struct Stm32Gpio {

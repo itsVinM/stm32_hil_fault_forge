@@ -20,12 +20,8 @@ weights:
 
 # Host connection
 host:
-  port: "auto"          # Serial port (auto-detects ttyUSB/usbmodem/ttyACM/cu.)
-  baud: 115200
-  timeout_ms: 50
+  port: "auto"          # Serial port ("simulate" runs in-process; otherwise auto-detects ttyUSB/usbmodem/ttyACM/cu.)
 
 # Output
 report:
-  csv_dir: "faultforge_out"
-  csv_prefix: "campaign"
   quiet: false

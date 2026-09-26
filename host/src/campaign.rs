@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use faultforge_shared::{encode_start, get_u16, get_u32, K_END, K_FAULT, K_SENSOR};
+use faultforge_shared::{encode_start, K_END, K_FAULT, K_SENSOR};
 use tokio::sync::mpsc;
 
 use crate::dut::{DetKind, Detection, Dut, DuFrame, GroundTruth};
@@ -67,7 +67,7 @@ pub async fn run(opts: Opts, link: Link, mut frame_rx: mpsc::Receiver<DuFrame>, 
         seed: opts.seed,
         packets: opts.packets,
         cadence_ms: opts.cadence_ms,
-        weights: profile_weights(opts.profile),
+        weights: opts.weights.unwrap_or_else(|| profile_weights(opts.profile)),
     };
     let (frame, n) = encode_start(&cfg);
     let _ = link.outbound.send(frame[..n].to_vec()).await;
@@ -84,7 +84,7 @@ pub async fn run(opts: Opts, link: Link, mut frame_rx: mpsc::Receiver<DuFrame>, 
         match f.kind {
             K_SENSOR => dut.process(&f),
             K_FAULT => {
-                if let Some(gt) = GroundTruth::from_payload(&f.payload[..f.len], dut.frame_idx) {
+                if let Some(gt) = GroundTruth::from_payload(&f.payload[..f.len]) {
                     truths.push(gt);
                 }
             }
@@ -209,12 +209,12 @@ mod tests {
     use std::time::Instant;
 
     fn dt(kind: DetKind, seq: u16) -> (Detection, Instant) {
-        let d = Detection { kind, seq, at: Instant::now(), frame_idx: 0 };
+        let d = Detection { kind, seq, at: Instant::now() };
         (d, d.at)
     }
 
     fn gt(kind: u8, at_seq: u16, fid: u32) -> GroundTruth {
-        GroundTruth { fault_id: fid, kind, at_seq, frame_idx: 0, at: Instant::now() }
+        GroundTruth { fault_id: fid, kind, at_seq, at: Instant::now() }
     }
 
     #[test]
@@ -237,7 +237,7 @@ mod tests {
             gt(faultforge_shared::FAULT_BITFLIP, 66, 6),
             gt(faultforge_shared::FAULT_BURST, 77, 7),
         ];
-        let opts = Opts { simulated: true, seed: 1, packets: 100, cadence_ms: 5, profile: "fuzz", quiet: true };
+        let opts = Opts { simulated: true, seed: 1, packets: 100, cadence_ms: 5, profile: "fuzz", quiet: true, weights: None };
         let res = score(opts, dets, truths);
         assert_eq!(res.injected, 7);
         assert_eq!(res.detected, 7, "all injected faults should be detected");
@@ -251,7 +251,7 @@ mod tests {
             gt(faultforge_shared::FAULT_DROP, 10, 1),
             gt(faultforge_shared::FAULT_DELAY, 20, 2),
         ];
-        let opts = Opts { simulated: true, seed: 1, packets: 100, cadence_ms: 5, profile: "fuzz", quiet: true };
+        let opts = Opts { simulated: true, seed: 1, packets: 100, cadence_ms: 5, profile: "fuzz", quiet: true, weights: None };
         let res = score(opts, dets, truths);
         // drop mismatch: crc detection isn't a drop detection
         assert_eq!(res.injected, 2);

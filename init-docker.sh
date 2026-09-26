@@ -31,7 +31,7 @@ case "$cmd" in
             --device /dev/ttyUSB0:/dev/ttyUSB0 \
             --device /dev/ttyACM0:/dev/ttyACM0 \
             "$IMAGE_NAME" \
-            run --config /app/campaign.yaml --port /dev/ttyUSB0
+            run --config /app/campaign.yaml
         ;;
 
     shell)

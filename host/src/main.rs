@@ -12,7 +12,6 @@ mod report;
 use std::path::Path;
 use std::time::Duration;
 
-use faultforge_shared::MAX_PAYLOAD;
 use tokio::sync::mpsc;
 
 const CMD_HELP: &str = "\
@@ -23,14 +22,11 @@ USAGE:
 
 OPTIONS:
   --config <file>       Campaign YAML config (default: campaign.yaml)
-  --port <dev>          Serial device of the injector (default: autodetect)
-  --baud <n>            Baud rate (default: 115200)
   --simulate            Run the injector in-process (no hardware needed)
   --seed <n>            Campaign RNG seed (default: 42)
   --packets <n>         Packets per campaign (default: 1500)
   --cadence-ms <n>      Packet cadence in ms (default: 5)
   --profile <name>      clean | fuzz | emi | stress | delay (default: fuzz)
-  --report <path>       CSV report path (default: faultforge_out/campaign_<seed>.csv)
   --quiet               Only print the final report
   --list-ports          List serial ports and exit
 ";
@@ -75,6 +71,7 @@ struct Opts {
     cadence_ms: u16,
     profile: &'static str,
     quiet: bool,
+    weights: Option<[u8; faultforge_shared::N_FAULT_KINDS]>,
 }
 
 fn arg_val(args: &[String], flag: &str) -> Option<String> {
@@ -103,6 +100,7 @@ fn parse_args(args: &[String]) -> Opts {
             }
         },
         quiet: args.iter().any(|a| a == "--quiet"),
+        weights: None,
     }
 }
 
@@ -134,7 +132,7 @@ async fn run(opts: Opts) {
         let port = match find_port() {
             Some(p) => p,
             None => {
-                eprintln!("no serial port found; try --simulate or specify --port");
+                eprintln!("no serial port found; try --simulate or --config with host.port");
                 return;
             }
         };
@@ -205,7 +203,7 @@ async fn handshake(link: &link::Link, frame_rx: &mut mpsc::Receiver<dut::DuFrame
     .map_err(|_| "timeout waiting for PONG".to_string())?
 }
 
-async fn parse_stream(mut rx: mpsc::Receiver<Vec<u8>>, mut frame_tx: mpsc::Sender<dut::DuFrame>) {
+async fn parse_stream(mut rx: mpsc::Receiver<Vec<u8>>, frame_tx: mpsc::Sender<dut::DuFrame>) {
     let mut parser = faultforge_shared::FrameParser::new();
     while let Some(chunk) = rx.recv().await {
         for &b in &chunk {
