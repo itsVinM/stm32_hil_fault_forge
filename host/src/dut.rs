@@ -123,7 +123,7 @@ impl Dut {
         let now = Instant::now();
 
         if let (Some(last), Some(lt)) = (self.last_seq, self.last_time) {
-            let on_time = now.duration_since(lt).as_millis() as u64 < self.late_budget_ms();
+            let on_time = (now.duration_since(lt).as_millis() as u64) < self.late_budget_ms();
             let expected = last.wrapping_add(1);
             if seq == expected {
                 // Normal arrival. But if it was grossly late, flag it.

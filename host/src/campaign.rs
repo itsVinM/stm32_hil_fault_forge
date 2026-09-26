@@ -233,8 +233,8 @@ mod tests {
             gt(faultforge_shared::FAULT_DELAY, 21, 2),
             gt(faultforge_shared::FAULT_REPLAY, 33, 3),
             gt(faultforge_shared::FAULT_BITFLIP, 41, 4),
-            gt(faultforge_shared::FAULT_BITFLIP, 66, 5),
-            gt(faultforge_shared::FAULT_BYTE, 55, 6),
+            gt(faultforge_shared::FAULT_BYTE, 55, 5),
+            gt(faultforge_shared::FAULT_BITFLIP, 66, 6),
             gt(faultforge_shared::FAULT_BURST, 77, 7),
         ];
         let opts = Opts { simulated: true, seed: 1, packets: 100, cadence_ms: 5, profile: "fuzz", quiet: true };

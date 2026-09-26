@@ -1,6 +1,6 @@
 # STM32 HIL Fault Forge
 
-A production-grade, asynchronous Hardware-in-the-Loop (HIL) fault injection and telemetry framework built for low-level embedded security analysis and target resilience testing on the STM32F401RE.
+An asynchronous Hardware-in-the-Loop (HIL) fault injection and telemetry framework built for low-level embedded security analysis and target resilience testing on the STM32F401RE.
 
 The system couples a bare-metal `no_std` Rust firmware target with a high-throughput, Tokio-driven host orchestrator to execute automated fault campaigns, perform side-channel power analysis, and validate target recovery state in real time.
 

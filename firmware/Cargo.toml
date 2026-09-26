@@ -1,0 +1,28 @@
+[package]
+name = "faultforge-firmware"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+faultforge-shared = { path = "../shared" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", features = ["platform-cortex-m", "executor-thread", "defmt"] }
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy", features = ["stm32f401re", "time-driver-tim2", "exti", "defmt"] }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
+defmt = "0.3"
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+cortex-m = { version = "0.7", features = ["inline-asm", "critical-section-single-core"] }
+cortex-m-rt = "0.7"
+critical-section = "1.0"
+
+[profile.release]
+opt-level = "s"
+debug = 2
+lto = true
+
+[profile.dev]
+opt-level = "z"
+debug = 2

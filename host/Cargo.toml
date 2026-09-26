@@ -11,6 +11,8 @@ path = "src/main.rs"
 faultforge-shared = { path = "../shared" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "signal"] }
 serialport = "4"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "macros", "rt-multi-thread", "time", "sync", "io-util", "signal"] }

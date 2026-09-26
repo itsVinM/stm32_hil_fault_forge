@@ -4,10 +4,12 @@
 //! ground-truth FAULT_EVENT stream, and reports campaign metrics.
 
 mod campaign;
+mod config;
 mod dut;
 mod link;
 mod report;
 
+use std::path::Path;
 use std::time::Duration;
 
 use faultforge_shared::MAX_PAYLOAD;
@@ -20,6 +22,7 @@ USAGE:
   faultforge run [OPTIONS]
 
 OPTIONS:
+  --config <file>       Campaign YAML config (default: campaign.yaml)
   --port <dev>          Serial device of the injector (default: autodetect)
   --baud <n>            Baud rate (default: 115200)
   --simulate            Run the injector in-process (no hardware needed)
@@ -42,7 +45,24 @@ fn main() {
         list_ports();
         return;
     }
-    let opts = parse_args(&args);
+
+    // Load YAML config if present
+    let config_path = arg_val(&args, "--config").unwrap_or_else(|| "campaign.yaml".into());
+    let opts = if Path::new(&config_path).exists() {
+        match config::CampaignConfigYaml::load(Path::new(&config_path)) {
+            Ok(cfg) => {
+                eprintln!("→ loaded campaign config from {config_path}");
+                cfg.to_opts()
+            }
+            Err(e) => {
+                eprintln!("failed to load {config_path}: {e}");
+                parse_args(&args)
+            }
+        }
+    } else {
+        parse_args(&args)
+    };
+
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     rt.block_on(run(opts));
 }
