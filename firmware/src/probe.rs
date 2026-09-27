@@ -1,10 +1,15 @@
 //! Bit-banged bus exercisers for the HIL bench.
 //!
 //! Ported from the HiL Probe firmware protocol set (`hil-probe/fw/src/protocols`).
-//! Pure `no_std` logic driven through the [`GpioOps`] trait so the same code runs
-//! on the host (simulator / unit tests) and in the STM32 firmware with an Embassy
-//! GPIO backend. Each exerciser emits a realistic transaction on a handful of
+//! Pure `no_std` logic driven through the [`GpioOps`] trait, so the same code runs
+//! against a recording backend in unit tests and against real pins in the
+//! firmware. Each exerciser emits a realistic transaction on a handful of
 //! logical pins; a backend may log every edge for off-line decoding.
+//!
+//! Dormant: nothing in the campaign path calls these yet, hence the
+//! `dead_code` allowance (mirroring `probe_gpio.rs`).
+
+#![allow(dead_code)]
 
 pub mod pins {
     //! Logical pin map shared by the exercisers (labels only; a backend maps
@@ -175,7 +180,7 @@ pub mod i2c {
         half_delay(gpio);
         scl_high(gpio);
         half_delay(gpio);
-        let ack = sda_read(gpio) == false; // ACK = SDA low
+        let ack = !sda_read(gpio); // ACK = SDA low
         scl_low(gpio);
         half_delay(gpio);
         ack
@@ -307,7 +312,10 @@ mod tests {
                 .map(|&(_, _, v, d)| (v, d))
         }
         fn count(&self, pin: u8, val: u8) -> usize {
-            self.events.iter().filter(|(_, p, v, _)| *p == pin && *v == val).count()
+            self.events
+                .iter()
+                .filter(|(_, p, v, _)| *p == pin && *v == val)
+                .count()
         }
     }
 

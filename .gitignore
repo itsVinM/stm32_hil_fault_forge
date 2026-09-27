@@ -1,6 +1,6 @@
 /target
 firmware/target
-Cargo.lock
-firmware/Cargo.lock
 *.elf
-faultforge_out/
+
+# The root lockfile is committed; firmware/Cargo.lock is committed too (the
+# embassy-* git deps carry no rev pin, so an unlocked build floats to HEAD).

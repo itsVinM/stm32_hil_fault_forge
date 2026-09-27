@@ -1,11 +1,19 @@
-[workspace]
-members = [
-    "shared",
-    "host",
-]
-default-members = ["shared", "host"]
-resolver = "2"
+[package]
+name = "faultforge"
+version = "0.1.0"
+edition = "2021"
+
+# The bench-side sender. It is a single package with no workspace: the only
+# other crate in the repo is the firmware, which is its own workspace because it
+# cross-compiles to thumbv7em-none-eabihf. `firmware/` simply lives in a
+# subdirectory and is not referenced from here.
+
+[dependencies]
+serialport = { version = "4.7", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 
 [profile.release]
+opt-level = "z"
 lto = true
-debug = 1
+codegen-units = 1
+strip = true

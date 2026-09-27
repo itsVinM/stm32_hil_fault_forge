@@ -15,13 +15,13 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use panic_probe as _;
 
-use faultforge_shared::{
-    decode_start, encode_end, encode_fault_event, encode_pong, encode_sensor,
-    CampaignConfig, FAULT_BITFLIP, FAULT_BURST, FAULT_BYTE, FAULT_DELAY, FAULT_DROP,
-    FAULT_DUTY, FAULT_REPLAY, K_ABORT, K_FAULT, K_PING, K_START, Lcg, N_FAULT_KINDS,
-};
 use embassy_stm32::usart::{Config as UartConfig, Uart};
 use embassy_time::Timer;
+use faultforge_firmware::protocol::{
+    decode_start, encode_end, encode_fault_event, encode_pong, encode_sensor, CampaignConfig, Lcg,
+    FAULT_BITFLIP, FAULT_BURST, FAULT_BYTE, FAULT_DELAY, FAULT_DROP, FAULT_DUTY, FAULT_REPLAY,
+    K_ABORT, K_FAULT, K_PING, K_START, N_FAULT_KINDS,
+};
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -90,7 +90,10 @@ async fn tx_task(
             seq = 0;
             fault_id = 0;
             sent = 0;
-            info!("Campaign started: seed={}, packets={}, cadence={}ms", new_cfg.seed, new_cfg.packets, new_cfg.cadence_ms);
+            info!(
+                "Campaign started: seed={}, packets={}, cadence={}ms",
+                new_cfg.seed, new_cfg.packets, new_cfg.cadence_ms
+            );
         }
 
         // Check for abort
@@ -135,7 +138,11 @@ async fn tx_task(
                         let idx = 2 + rng.below(4) as usize;
                         payload[idx] ^= 0xA5;
                     }
-                    let (frame, n) = encode_sensor(this_seq, u32::from_le_bytes([payload[2], payload[3], payload[4], payload[5]]), fid);
+                    let (frame, n) = encode_sensor(
+                        this_seq,
+                        u32::from_le_bytes([payload[2], payload[3], payload[4], payload[5]]),
+                        fid,
+                    );
                     tx.blocking_write(&frame[..n]).unwrap();
                     let (frame, n) = encode_fault_event(fid, kind, this_seq);
                     tx.blocking_write(&frame[..n]).unwrap();
@@ -224,36 +231,33 @@ async fn rx_task(
     abort_signal: &'static Signal<CriticalSectionRawMutex, ()>,
     _glitch_signal: &'static Signal<CriticalSectionRawMutex, ()>,
 ) {
-    use faultforge_shared::FrameParser;
+    use faultforge_firmware::protocol::{Decoded, FrameParser};
     let mut parser = FrameParser::new();
     let mut byte = [0u8; 1];
 
     loop {
-        match rx.blocking_read(&mut byte) {
-            Ok(()) => {
-                if let Some(faultforge_shared::Decoded::Frame { kind, payload, len }) = parser.push(byte[0]) {
-                    match kind {
-                        K_PING => {
-                                let _ = encode_pong();
-                                // Need a way to send back - for now just log
-                                info!("PING received");
-                            }
-                        K_START => {
-                            if let Some(cfg) = decode_start(&payload[..len]) {
-                                campaign_signal.signal(cfg);
-                            }
-                        }
-                        K_ABORT => {
-                            abort_signal.signal(());
-                        }
-                        K_FAULT => {
-                            // Ignore ground-truth frames on Rx
-                        }
-                        _ => {}
+        if let Ok(()) = rx.blocking_read(&mut byte) {
+            if let Some(Decoded::Frame { kind, payload, len }) = parser.push(byte[0]) {
+                match kind {
+                    K_PING => {
+                        let _ = encode_pong();
+                        // Need a way to send back - for now just log
+                        info!("PING received");
                     }
+                    K_START => {
+                        if let Some(cfg) = decode_start(&payload[..len]) {
+                            campaign_signal.signal(cfg);
+                        }
+                    }
+                    K_ABORT => {
+                        abort_signal.signal(());
+                    }
+                    K_FAULT => {
+                        // Ignore ground-truth frames on Rx
+                    }
+                    _ => {}
                 }
             }
-            _ => {}
         }
         Timer::after_millis(1).await;
     }

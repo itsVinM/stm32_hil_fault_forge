@@ -3,7 +3,8 @@
 #![allow(dead_code)]
 
 use core::marker::PhantomData;
-use faultforge_shared::probe::GpioOps;
+
+use faultforge_firmware::probe::GpioOps;
 
 const PIN_TABLE: [(u8, u16, bool); 14] = [
     // (port 0=GPIOA,1=GPIOB, pad, input?, )
@@ -20,11 +21,11 @@ const PIN_TABLE: [(u8, u16, bool); 14] = [
     (1, 6, false),  // 10 (DHT) PB6 out
     (1, 11, false), // 11 TX_EN PB11 out
     (1, 12, false), // 12 CAN_TX PB12 out
-    (1, 13, true),   //13 CAN_RX PB13 in
+    (1, 13, true),  //13 CAN_RX PB13 in
 ];
 
 const GPIOA_BASE: u32 = 0x4002_0000;
-const RCC_AHB1ENR: u32 = 0x4002_3830
+const RCC_AHB1ENR: u32 = 0x4002_3830;
 
 /// STM32F401RE direct-register GPIO backend for `probe`.
 pub struct Stm32Gpio {
@@ -56,7 +57,10 @@ impl Stm32Gpio {
             (0xE000_1004 as *mut u32).write_volatile(0);
         }
 
-        Self { _not_send_sync: PhantomData, _dwt_enabled: true }
+        Self {
+            _not_send_sync: PhantomData,
+            _dwt_enabled: true,
+        }
     }
 
     #[inline]
@@ -120,7 +124,7 @@ impl GpioOps for Stm32Gpio {
 
     fn delay_ns(&mut self, ns: u64) {
         // DWT cycle counter at 84 MHz -> ~11.9 ns/cycle; ceil to 12 ns.
-        let wait = (ns + 11) / 12;
+        let wait = ns.div_ceil(12);
         let start = self.now_cycles();
         loop {
             let cur = self.now_cycles().wrapping_sub(start);

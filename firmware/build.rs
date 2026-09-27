@@ -10,5 +10,8 @@ fn main() {
 
     // tell cargo to re-run this if memory.x changes
     println!("cargo:rerun-if-changed=memory.x");
-    println!("cargo:rustc-link-search={}", linker_script_destination.display());
+    println!(
+        "cargo:rustc-link-search={}",
+        linker_script_destination.display()
+    );
 }

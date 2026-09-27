@@ -1,16 +1,18 @@
-//! faultforge-shared: wire protocol for the HIL fault-injection bench.
+//! The wire contract. The firmware owns this format; the host encodes the two
+//! control frames it needs against it.
 //!
 //! Frame layout (both directions over the same UART):
 //!   [0x7E sync] [len] [kind] [payload (len bytes)] [crc8]
 //! crc8 covers [len, kind, payload].
 //!
-//! Guarded by a FrameParser that resyncs on garbage, so corrupted bytes are
-//! observable (the host DUT relies on this to detect injections).
+//! Guarded by a FrameParser that resyncs on garbage, so corrupted bytes stay
+//! observable on the wire instead of desynchronising the stream.
+//!
+//! The firmware also owns the bit-bang bus exercisers in [`super::probe`] —
+//! firmware-only code lives here, not in a crate shared with the host, which
+//! would only compile it to never call it.
 
-#![no_std]
 #![cfg_attr(not(test), forbid(unsafe_code))]
-
-pub mod probe;
 
 pub const SYNC: u8 = 0x7E;
 
@@ -21,7 +23,6 @@ pub const MAX_FRAME: usize = 3 + MAX_PAYLOAD + 1; // sync + len + kind + payload
 pub const K_START: u8 = 0x01; // host -> fw: begin a campaign
 pub const K_PING: u8 = 0x02; // host -> fw: link handshake
 pub const K_ABORT: u8 = 0x03; // host -> fw: stop current campaign
-pub const K_GLITCH: u8 = 0x04; // host -> fw: fire one physical duty glitch
 
 pub const K_SENSOR: u8 = 0x80; // fw -> host: a "measurement" frame (may be faulted)
 pub const K_FAULT: u8 = 0x81; // fw -> host: ground-truth injection notice
@@ -50,12 +51,6 @@ pub struct CampaignConfig {
     pub packets: u16,
     pub cadence_ms: u16,
     pub weights: [u8; N_FAULT_KINDS],
-}
-
-impl CampaignConfig {
-    pub fn clean(seed: u32, packets: u16, cadence_ms: u16) -> Self {
-        Self { seed, packets, cadence_ms, weights: [0; N_FAULT_KINDS] }
-    }
 }
 
 /// Deterministic PRNG shared by the firmware injector and the host simulator so
@@ -94,18 +89,14 @@ pub fn crc8(data: &[u8]) -> u8 {
     for &b in data {
         c ^= b;
         for _ in 0..8 {
-            c = if c & 0x80 != 0 { (c << 1) ^ 0x07 } else { c << 1 };
+            c = if c & 0x80 != 0 {
+                (c << 1) ^ 0x07
+            } else {
+                c << 1
+            };
         }
     }
     c
-}
-
-pub fn crc8_frame(len: u8, kind: u8, payload: &[u8]) -> u8 {
-    let mut short = [0u8; 1 + 1 + MAX_PAYLOAD];
-    short[0] = len;
-    short[1] = kind;
-    short[2..2 + payload.len()].copy_from_slice(payload);
-    crc8(&short[..2 + payload.len()])
 }
 
 /// Encode a frame into a fixed buffer. Returns (buffer, total length incl. crc).
@@ -137,10 +128,7 @@ pub fn put_u32(d: &mut [u8], o: usize, v: u32) {
 }
 
 pub fn get_u32(d: &[u8], o: usize) -> u32 {
-    d[o] as u32
-        | ((d[o + 1] as u32) << 8)
-        | ((d[o + 2] as u32) << 16)
-        | ((d[o + 3] as u32) << 24)
+    d[o] as u32 | ((d[o + 1] as u32) << 8) | ((d[o + 2] as u32) << 16) | ((d[o + 3] as u32) << 24)
 }
 
 // ---- host -> injector ----
@@ -152,10 +140,6 @@ pub fn encode_start(cfg: &CampaignConfig) -> ([u8; MAX_FRAME], usize) {
     put_u16(&mut p, 6, cfg.cadence_ms);
     p[8..8 + N_FAULT_KINDS].copy_from_slice(&cfg.weights);
     encode(K_START, &p)
-}
-
-pub fn encode_ping() -> ([u8; MAX_FRAME], usize) {
-    encode(K_PING, &[])
 }
 
 pub fn encode_abort() -> ([u8; MAX_FRAME], usize) {
@@ -210,7 +194,11 @@ pub fn encode_pong() -> ([u8; MAX_FRAME], usize) {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Decoded {
     /// A frame passed and its CRC verified.
-    Frame { kind: u8, payload: [u8; MAX_PAYLOAD], len: usize },
+    Frame {
+        kind: u8,
+        payload: [u8; MAX_PAYLOAD],
+        len: usize,
+    },
     /// Enough bytes for a frame arrived but the CRC did not match. The junk is
     /// consumed; this is the observable signature of a corrupted frame.
     BadCrc { kind: u8 },
@@ -223,9 +211,18 @@ pub struct FrameParser {
     len: usize,
 }
 
+impl Default for FrameParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FrameParser {
     pub const fn new() -> Self {
-        Self { buf: [0; MAX_FRAME], len: 0 }
+        Self {
+            buf: [0; MAX_FRAME],
+            len: 0,
+        }
     }
 
     /// Feed one byte; returns at most one outcome per call.
@@ -238,66 +235,68 @@ impl FrameParser {
     }
 
     fn extract(&mut self) -> Option<Decoded> {
-        loop {
-            // Find the first sync byte.
-            match self.buf[..self.len].iter().position(|&x| x == SYNC) {
-                None => {
-                    if self.len > 0 {
-                        self.len = 0;
-                        return Some(Decoded::Garbage);
-                    }
-                    return None;
+        // Find the first sync byte.
+        match self.buf[..self.len].iter().position(|&x| x == SYNC) {
+            None => {
+                if self.len > 0 {
+                    self.len = 0;
+                    return Some(Decoded::Garbage);
                 }
-                Some(0) => {}
-                Some(i) => {
-                    self.buf.copy_within(i..self.len, 0);
-                    self.len -= i;
-                    // Bytes before the sync are junk.
-                    if i > 0 {
-                        return Some(Decoded::Garbage);
-                    }
+                return None;
+            }
+            Some(0) => {}
+            Some(i) => {
+                self.buf.copy_within(i..self.len, 0);
+                self.len -= i;
+                // Bytes before the sync are junk.
+                if i > 0 {
+                    return Some(Decoded::Garbage);
                 }
             }
-
-            if self.len < 2 {
-                return None; // need len byte
-            }
-            let plen = self.buf[1] as usize;
-            // Guard against absurd lengths (also resyncs on corrupted len bytes).
-            if plen > MAX_PAYLOAD {
-                // Skip only the SYNC byte and retry; don't consume the next byte as len.
-                self.buf.copy_within(1..self.len, 0);
-                self.len -= 1;
-                return Some(Decoded::Garbage);
-            }
-            let need = 4 + plen; // sync + len + kind + payload + crc
-            if self.len < need {
-                return None; // need more bytes
-            }
-
-            let kind = self.buf[2];
-            let mut full = [0u8; MAX_PAYLOAD];
-            full[..plen].copy_from_slice(&self.buf[3..3 + plen]);
-            let expected = crc8(&self.buf[1..3 + plen]);
-            let got = self.buf[need - 1];
-
-            // Consume exactly the frame.
-            self.buf.copy_within(need..self.len, 0);
-            self.len -= need;
-
-            if got != expected {
-                return Some(Decoded::BadCrc { kind });
-            }
-            return Some(Decoded::Frame { kind, payload: full, len: plen });
         }
+
+        if self.len < 2 {
+            return None; // need len byte
+        }
+        let plen = self.buf[1] as usize;
+        // Guard against absurd lengths (also resyncs on corrupted len bytes).
+        if plen > MAX_PAYLOAD {
+            // Skip only the SYNC byte and retry; don't consume the next byte as len.
+            self.buf.copy_within(1..self.len, 0);
+            self.len -= 1;
+            return Some(Decoded::Garbage);
+        }
+        let need = 4 + plen; // sync + len + kind + payload + crc
+        if self.len < need {
+            return None; // need more bytes
+        }
+
+        let kind = self.buf[2];
+        let mut full = [0u8; MAX_PAYLOAD];
+        full[..plen].copy_from_slice(&self.buf[3..3 + plen]);
+        let expected = crc8(&self.buf[1..3 + plen]);
+        let got = self.buf[need - 1];
+
+        // Consume exactly the frame.
+        self.buf.copy_within(need..self.len, 0);
+        self.len -= need;
+
+        if got != expected {
+            return Some(Decoded::BadCrc { kind });
+        }
+        Some(Decoded::Frame {
+            kind,
+            payload: full,
+            len: plen,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     extern crate std;
-    use std::vec::Vec;
     use super::*;
+    use std::vec::Vec;
 
     // Debug copy of FrameParser with logging
     struct DebugParser {
@@ -306,7 +305,12 @@ mod tests {
     }
 
     impl DebugParser {
-        fn new() -> Self { Self { buf: [0; MAX_FRAME], len: 0 } }
+        fn new() -> Self {
+            Self {
+                buf: [0; MAX_FRAME],
+                len: 0,
+            }
+        }
         fn push(&mut self, b: u8) -> Option<Decoded> {
             if self.len < self.buf.len() {
                 self.buf[self.len] = b;
@@ -315,59 +319,66 @@ mod tests {
             self.extract()
         }
         fn extract(&mut self) -> Option<Decoded> {
-            loop {
-                match self.buf[..self.len].iter().position(|&x| x == SYNC) {
-                    None => {
-                        if self.len > 0 {
-                            std::eprintln!("  [DBG] no sync, len={} -> Garbage, clear", self.len);
-                            self.len = 0;
-                            return Some(Decoded::Garbage);
-                        }
-                        return None;
+            match self.buf[..self.len].iter().position(|&x| x == SYNC) {
+                None => {
+                    if self.len > 0 {
+                        std::eprintln!("  [DBG] no sync, len={} -> Garbage, clear", self.len);
+                        self.len = 0;
+                        return Some(Decoded::Garbage);
                     }
-                    Some(0) => {}
-                    Some(i) => {
-                        std::eprintln!("  [DBG] sync at {}, shift by {}, len={}", i, i, self.len);
-                        self.buf.copy_within(i..self.len, 0);
-                        self.len -= i;
-                        if i > 0 {
-                            return Some(Decoded::Garbage);
-                        }
-                    }
-                }
-                if self.len < 2 {
-                    std::eprintln!("  [DBG] need len byte, len={}", self.len);
                     return None;
                 }
-                let plen = self.buf[1] as usize;
-                std::eprintln!("  [DBG] plen={}, MAX_PAYLOAD={}", plen, MAX_PAYLOAD);
-                if plen > MAX_PAYLOAD {
-                    std::eprintln!("  [DBG] plen > MAX_PAYLOAD, skip 1 byte, len={}", self.len);
-                    self.buf.copy_within(1..self.len, 0);
-                    self.len -= 1;
-                    return Some(Decoded::Garbage);
+                Some(0) => {}
+                Some(i) => {
+                    std::eprintln!("  [DBG] sync at {}, shift by {}, len={}", i, i, self.len);
+                    self.buf.copy_within(i..self.len, 0);
+                    self.len -= i;
+                    if i > 0 {
+                        return Some(Decoded::Garbage);
+                    }
                 }
-                let need = 4 + plen; // sync + len + kind + payload + crc
-                std::eprintln!("  [DBG] need={}, len={}", need, self.len);
-                if self.len < need {
-                    std::eprintln!("  [DBG] need more bytes");
-                    return None;
-                }
-                let kind = self.buf[2];
-                let mut full = [0u8; MAX_PAYLOAD];
-                full[..plen].copy_from_slice(&self.buf[3..3 + plen]);
-                let expected = crc8(&self.buf[1..3 + plen]);
-                let got = self.buf[need - 1];
-                std::eprintln!("  [DBG] kind={}, expected_crc={:02X}, got_crc={:02X}", kind, expected, got);
-                self.buf.copy_within(need..self.len, 0);
-                self.len -= need;
-                if got != expected {
-                    std::eprintln!("  [DBG] CRC mismatch -> BadCrc");
-                    return Some(Decoded::BadCrc { kind });
-                }
-                std::eprintln!("  [DBG] CRC OK -> Frame");
-                return Some(Decoded::Frame { kind, payload: full, len: plen });
             }
+            if self.len < 2 {
+                std::eprintln!("  [DBG] need len byte, len={}", self.len);
+                return None;
+            }
+            let plen = self.buf[1] as usize;
+            std::eprintln!("  [DBG] plen={}, MAX_PAYLOAD={}", plen, MAX_PAYLOAD);
+            if plen > MAX_PAYLOAD {
+                std::eprintln!("  [DBG] plen > MAX_PAYLOAD, skip 1 byte, len={}", self.len);
+                self.buf.copy_within(1..self.len, 0);
+                self.len -= 1;
+                return Some(Decoded::Garbage);
+            }
+            let need = 4 + plen; // sync + len + kind + payload + crc
+            std::eprintln!("  [DBG] need={}, len={}", need, self.len);
+            if self.len < need {
+                std::eprintln!("  [DBG] need more bytes");
+                return None;
+            }
+            let kind = self.buf[2];
+            let mut full = [0u8; MAX_PAYLOAD];
+            full[..plen].copy_from_slice(&self.buf[3..3 + plen]);
+            let expected = crc8(&self.buf[1..3 + plen]);
+            let got = self.buf[need - 1];
+            std::eprintln!(
+                "  [DBG] kind={}, expected_crc={:02X}, got_crc={:02X}",
+                kind,
+                expected,
+                got
+            );
+            self.buf.copy_within(need..self.len, 0);
+            self.len -= need;
+            if got != expected {
+                std::eprintln!("  [DBG] CRC mismatch -> BadCrc");
+                return Some(Decoded::BadCrc { kind });
+            }
+            std::eprintln!("  [DBG] CRC OK -> Frame");
+            Some(Decoded::Frame {
+                kind,
+                payload: full,
+                len: plen,
+            })
         }
     }
 
@@ -418,8 +429,13 @@ mod tests {
                 out.push(d);
             }
         }
-        let has_frame = out.iter().any(|d| matches!(d, Decoded::Frame { kind: K_SENSOR, .. }));
-        assert!(has_frame, "parser should find the frame after garbage: {out:?}");
+        let has_frame = out
+            .iter()
+            .any(|d| matches!(d, Decoded::Frame { kind: K_SENSOR, .. }));
+        assert!(
+            has_frame,
+            "parser should find the frame after garbage: {out:?}"
+        );
     }
 
     #[test]
@@ -461,7 +477,7 @@ mod tests {
         assert_eq!(got.weights, cfg.weights);
     }
 
-#[test]
+    #[test]
     fn lcg_deterministic_and_distributed() {
         let mut a = Lcg::new(42);
         let mut b = Lcg::new(42);

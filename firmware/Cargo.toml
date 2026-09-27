@@ -3,10 +3,27 @@ name = "faultforge-firmware"
 version = "0.1.0"
 edition = "2021"
 
+# Own workspace: cross-compiles to thumbv7em-none-eabihf via the
+# [build] target in firmware/.cargo/config.toml. Because cargo locates
+# .cargo/config.toml relative to the current directory rather than to
+# --manifest-path, always build as `cd firmware && cargo build --release`.
+# Invoking this from the repo root builds for the host and fails with
+# "`#[panic_handler]` function required, but not found".
 [workspace]
 
-[dependencies]
-faultforge-shared = { path = "../shared" }
+# Library target holding the testable core: the wire protocol and the bus
+# exercisers. Keeps `cargo test --lib` able to run them on the host.
+[lib]
+name = "faultforge_firmware"
+path = "src/lib.rs"
+
+# Bare-metal-only dependencies, gated on target_os = "none".
+#
+# Cargo resolves dependencies per *package*, not per target, so leaving these
+# ungated would drag embassy-stm32 and cortex-m-rt into the host build of the
+# library and fail there. The gate is what makes `cargo test --lib` work.
+# Neither `protocol` nor `probe` needs any of them — they are pure logic.
+[target.'cfg(target_os = "none")'.dependencies]
 embassy-executor = { git = "https://github.com/embassy-rs/embassy", features = ["platform-cortex-m", "executor-thread", "defmt"] }
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy", features = ["stm32f401re", "time-driver-tim2", "exti", "defmt"] }
 embassy-time = { git = "https://github.com/embassy-rs/embassy", features = ["defmt", "defmt-timestamp-uptime"] }
